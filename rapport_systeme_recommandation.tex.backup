@@ -364,86 +364,140 @@ Temps d'exécution & 18 min & 1.5 s & 720$\times$ plus rapide \\
 
 Le filtrage par contenu surpasse significativement le filtrage collaboratif sur toutes les métriques de recommandation.
 
-\section{Analyse et Interprétation}
+\section{Analyse et Interprétation des Résultats}
 
-\subsection{Pourquoi le Contenu Gagne}
+\subsection{Supériorité du Filtrage par Contenu}
 
-\textbf{Constat principal :} Le filtrage par contenu surpasse largement le CF sur ce dataset. La précision est 6.8$\times$ meilleure (3.65\% vs 0.54\%) et le recall 8.5$\times$ meilleur (26.80\% vs 3.15\%).
+\subsubsection{Analyse Quantitative}
 
-\textbf{Explication :} La sparsité extrême (98.26\%) limite fortement le CF qui manque d'overlaps entre utilisateurs pour calculer des similarités robustes. Avec seulement 7 interactions en moyenne par utilisateur, le CF peine à identifier des voisins pertinents.
+Les résultats montrent une domination claire du filtrage par contenu :
+\begin{itemize}
+    \item Précision 6.8$\times$ supérieure (3.65\% vs 0.54\%)
+    \item Recall 8.5$\times$ supérieur (26.80\% vs 3.15\%)
+    \item Vitesse d'exécution 720$\times$ plus rapide (1.5s vs 18 min)
+\end{itemize}
 
-À l'inverse, le contenu exploite efficacement les attributs structurés (catégorie, fit) qui sont bien renseignés même quand les avis textuels sont courts. Pour la mode, ces attributs sont très informatifs : un utilisateur qui aime des robes bien ajustées appréciera probablement d'autres robes similaires.
+\subsubsection{Interprétation : Impact de la Sparsité}
 
-\subsection{Limites du CF}
+La sparsité extrême (98.26\%) explique principalement ces différences. Avec seulement 7 interactions en moyenne par utilisateur, le filtrage collaboratif manque cruellement de données pour identifier des patterns robustes :
 
-Le k-NN item-based utilisé est trop basique pour des données sparses. Des méthodes de factorisation matricielle (SVD, ALS) auraient mieux capturé les patterns latents. De plus, l'évaluation prend 18 minutes contre 1.5 secondes pour le contenu, rendant le CF impraticable en production. Enfin, le CF souffre du problème du cold start (nouveaux utilisateurs/items), contrairement au contenu.
+\textbf{Pour le CF :} Les overlaps entre utilisateurs sont rares. Quand on cherche les k plus proches voisins d'un item, peu d'utilisateurs ont noté à la fois l'item cible et ses voisins potentiels. Cela produit des prédictions basées sur très peu de données, d'où les faibles performances.
 
-\subsection{Performances Absolues}
+\textbf{Pour le Contenu :} Chaque item possède des attributs structurés (catégorie, fit) systématiquement renseignés. Ces métadonnées sont très informatives dans le domaine de la mode : la catégorie (robe, pantalon, etc.) et l'ajustement sont des critères de choix primaires pour les utilisateurs.
 
-Même le meilleur modèle (contenu) n'atteint que 3.65\% de précision : moins d'1 recommandation sur 10 est pertinente. Cela reste modeste à cause de la sparsité résiduelle (98.26\%), des avis textuels courts, et du manque de features riches (images, prix, matériaux). Pour la production, un modèle hybride serait nécessaire.
+\subsection{Analyse des Caractéristiques du Dataset}
 
-\section{Problèmes Rencontrés}
+\subsubsection{Qualité des Features}
 
-\textbf{Sparsité écrasante :} Le dataset initial était quasi vide (99.87\% de sparsité). Filtrer les utilisateurs/items avec moins de 5 interactions améliore la densité à 1.74\%, mais fait perdre 80\% des données. Compromis nécessaire mais douloureux.
+L'analyse révèle une asymétrie importante dans la qualité des données :
+\begin{itemize}
+    \item \textbf{Attributs structurés} : Très bien renseignés (category, fit présents sur quasi 100\% des items)
+    \item \textbf{Avis textuels} : Variables en qualité, beaucoup de champs vides ou très courts
+    \item \textbf{Notes} : Distribuées mais concentrées sur peu d'utilisateurs
+\end{itemize}
 
-\textbf{Avis textuels courts :} Beaucoup d'avis vides ou incomplets. Solution : amplifier le poids des attributs structurés (catégorie $\times$3, fit $\times$2) dans les vecteurs TF-IDF pour compenser.
+Cette asymétrie favorise naturellement le filtrage par contenu qui peut s'appuyer sur les attributs structurés fiables.
 
-\textbf{CF trop lent :} 18 minutes pour évaluer 4,033 prédictions. Même optimisé avec matrices sparse et k-NN brute force, le CF reste impraticable pour un usage temps réel.
+\subsubsection{Distribution des Interactions}
 
-\section{Pistes d'Amélioration}
+La distribution révèle un déséquilibre :
+\begin{itemize}
+    \item Beaucoup d'utilisateurs ont exactement 5 interactions (le minimum après filtrage)
+    \item Quelques items très populaires (max 449 interactions) vs beaucoup d'items peu notés
+    \item Effet "longue traîne" typique du e-commerce
+\end{itemize}
 
-\textbf{SVD au lieu de k-NN :} La factorisation matricielle découvre des facteurs latents (style casual, formel, sportif) qui expliquent mieux les préférences avec peu de données.
+Ce déséquilibre rend le CF encore plus difficile : les algorithmes de voisinage ont du mal avec des profils utilisateurs pauvres.
 
-\textbf{Enrichir les features :} Ajouter images (CNN), descriptions complètes, prix et matériaux pour donner plus d'informations aux modèles.
+\subsection{Interprétation des Métriques}
 
-\textbf{Modèle hybride :} Combiner CF et contenu ($score = 0.3 \times CF + 0.7 \times contenu$) pour bénéficier des forces des deux approches.
+\subsubsection{RMSE et MAE du CF}
 
-\textbf{Embeddings avancés :} BERT pour mieux comprendre les avis textuels, et modèles séquentiels pour capturer l'ordre des achats.
+Le RMSE de 1.04 et MAE de 0.72 indiquent que le CF prédit les notes avec une erreur moyenne inférieure à 1 étoile. Ces valeurs sont acceptables pour la prédiction de notes, mais cachent le vrai problème : les recommandations Top-K sont faibles.
+
+\subsubsection{Precision vs Recall}
+
+Le Recall élevé du contenu (26.80\%) signifie que sur 10 items pertinents dans le test, l'algorithme en capture environ 2-3 dans ses recommandations Top-10. C'est significativement mieux que le CF qui n'en capture que 0.3.
+
+La précision reste modeste (3.65\%) : sur 10 recommandations, moins d'1 est vraiment pertinente. Cela reflète la difficulté intrinsèque du problème avec des données aussi sparses.
+
+\section{Problèmes Rencontrés et Améliorations}
+
+\subsection{Les 3 Problèmes Majeurs}
+
+\textbf{1. Sparsité écrasante} : 99.87\% au départ, 98.26\% après filtrage. On a perdu 80\% des données (82,790 $\rightarrow$ 16,046) juste pour rendre le dataset exploitable. C'est la réalité du e-commerce : peu d'utilisateurs notent beaucoup de produits.
+
+\textbf{2. Avis textuels pauvres} : Beaucoup de champs vides ou trop courts. Solution : on a répété les attributs structurés (catégorie $\times$3, fit $\times$2) dans les vecteurs TF-IDF pour compenser. Ça marche parce que ces attributs sont toujours renseignés.
+
+\textbf{3. CF trop lent} : 18 minutes pour 4,033 prédictions = 267ms par prédiction. En production, on a besoin de < 100ms. Le k-NN brute force, même optimisé avec des matrices sparse, reste trop coûteux. Le contenu (1.5s total) est 720$\times$ plus rapide.
+
+\subsection{Ce qu'il Faudrait Faire}
+
+\textbf{Pour le CF :} Remplacer k-NN par SVD ou ALS. Ces méthodes de factorisation matricielle découvrent des "facteurs latents" (style casual, formel, etc.) qui marchent mieux avec peu de données et sont beaucoup plus rapides.
+
+\textbf{Pour le Contenu :} Utiliser BERT au lieu de TF-IDF pour mieux comprendre les textes, et ajouter des features visuelles (CNN sur les images) pour capturer le style.
+
+\textbf{L'idéal : un système hybride} qui combine les deux. Pour les nouveaux utilisateurs, priorité au contenu (cold start). Quand on a 10+ interactions, on commence à mixer. Avec 50+ interactions, on donne plus de poids au CF.
+
+\begin{equation}
+score = \alpha \times CF + (1-\alpha) \times Contenu
+\end{equation}
+
+où $\alpha$ augmente avec le nombre d'interactions de l'utilisateur.
 
 \section{Conclusion}
 
-\subsection{Résultats Principaux}
+\subsection{Ce qu'on Retient}
 
-Sur le dataset ModCloth avec sa sparsité extrême (98.26\%), le \textbf{filtrage par contenu surpasse largement le filtrage collaboratif} :
-
-\begin{itemize}
-    \item Recall : 26.80\% vs 3.15\% (8.5$\times$ meilleur)
-    \item Précision : 3.65\% vs 0.54\% (6.8$\times$ meilleure)
-\end{itemize}
-
-\textbf{Explication :} Le CF manque d'interactions communes entre utilisateurs pour calculer des similarités robustes. Le contenu exploite efficacement les attributs structurés (catégorie, ajustement) qui compensent les avis textuels souvent courts.
-
-\subsection{Statistiques Finales du Projet}
+Sur des données très sparses (98.26\%) avec des métadonnées riches, le filtrage par contenu écrase le CF : 6.8$\times$ plus précis, 8.5$\times$ meilleur recall, et 720$\times$ plus rapide. Pas de surprise : avec seulement 7 interactions par utilisateur en moyenne, le CF n'a pas assez de matière pour trouver des patterns.
 
 \begin{table}[H]
 \centering
-\begin{tabular}{ll}
+\begin{tabular}{lccc}
 \toprule
-\textbf{Statistique} & \textbf{Valeur} \\
+\textbf{Métrique} & \textbf{CF} & \textbf{Contenu} & \textbf{Facteur} \\
 \midrule
-Données initiales & 82,790 interactions \\
-Données finales & 16,046 interactions (19.38\%) \\
-Utilisateurs & 2,271 \\
-Items (vêtements) & 302 \\
-Densité de la matrice & 1.74\% \\
-Sparsité & 98.26\% \\
-\midrule
-\textbf{Filtrage Collaboratif :} & \\
-\quad RMSE & 1.04 \\
-\quad MAE & 0.72 \\
-\quad Precision@10 & 0.54\% \\
-\quad Recall@10 & 3.15\% \\
-\quad Temps d'évaluation & $\sim$18 minutes \\
-\midrule
-\textbf{Filtrage Contenu :} & \\
-\quad Precision@10 & 3.65\% \\
-\quad Recall@10 & 26.80\% \\
-\quad Temps d'évaluation & $\sim$1.5 secondes \\
+Precision@10 & 0.54\% & 3.65\% & 6.8$\times$ \\
+Recall@10 & 3.15\% & 26.80\% & 8.5$\times$ \\
+Temps & 18 min & 1.5 s & 720$\times$ \\
 \bottomrule
 \end{tabular}
-\caption{Résumé complet des performances du projet}
 \end{table}
 
-Pour conclure, ce projet nous a permis de confronter concrètement deux approches classiques de recommandation sur un jeu de données réel et difficile comme ModCloth, et de montrer qu’un filtrage basé sur le contenu peut devenir plus pertinent qu’un filtrage collaboratif lorsque les interactions sont très rares. Au-delà de l’implémentation des modèles, ce travail nous a appris à construire un pipeline de bout en bout, à faire des choix méthodologiques en fonction des données disponibles et à interpréter de façon critique les résultats obtenus. Les méthodes et réflexes développés ici pourront être réutilisés dans d’autres contextes de recommandation, que ce soit dans la mode en ligne ou dans d’autres domaines où l’on cherche à mieux comprendre et anticiper les préférences des utilisateurs.
+\subsection{Les Leçons}
+
+\textbf{Il n'y a pas de "meilleur" algorithme universel.} Ça dépend de vos données :
+\begin{itemize}
+    \item Données denses ? CF fonctionne bien
+    \item Données sparses avec bonnes métadonnées ? Contenu gagne
+    \item Entre les deux ? Faites un hybride
+\end{itemize}
+
+\textbf{La sparsité est le vrai problème.} Pas les algorithmes. Avec 98\% de sparsité, même les meilleures méthodes peinent. Il faut accepter cette réalité et construire dessus.
+
+\textbf{Les métadonnées structurées valent de l'or.} Pour la mode, catégorie et fit sont plus informatifs que 100 avis textuels courts. Investissez dans la qualité de ces données.
+
+\subsection{Les Limites}
+
+\begin{itemize}
+    \item Même le meilleur modèle (3.65\% précision) reste modeste
+    \item On a testé des algorithmes basiques (k-NN, TF-IDF), pas l'état de l'art
+    \item Pas de modèle hybride, pas d'images, pas de BERT
+    \item Perdu 80\% des données au filtrage
+\end{itemize}
+
+\subsection{Pour un Système en Production}
+
+\begin{enumerate}
+    \item Démarrer avec le contenu (gère le cold start)
+    \item Ajouter SVD/ALS pour le CF (pas k-NN)
+    \item Faire un hybride qui dose selon le profil utilisateur
+    \item Enrichir avec images (CNN) et textes (BERT)
+    \item Optimiser pour < 100ms de temps de réponse
+\end{enumerate}
+
+\subsection{Le Message Final}
+
+Comprendre ses données est aussi important que choisir le bon algorithme. La sparsité de ModCloth n'est pas un bug, c'est la réalité du e-commerce. Le CF est puissant mais a besoin d'adaptations (SVD, deep learning). Le contenu, souvent sous-estimé, est redoutablement efficace avec de bonnes métadonnées. La vraie solution ? Combiner intelligemment les deux.
 
 \end{document}

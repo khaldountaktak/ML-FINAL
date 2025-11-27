@@ -1,0 +1,475 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+
+\geometry{margin=2.5cm}
+
+\lstset{
+    language=Python,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    numbers=left,
+    numberstyle=\tiny\color{gray}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Système de Recommandation - ModCloth}
+\lhead{TSP - 2025}
+\cfoot{\thepage}
+
+\title{
+    \textbf{Système de Recommandation sur le Dataset ModCloth} \\
+    \large Comparaison du Filtrage Collaboratif et du Filtrage Basé sur le Contenu
+}
+\author{
+    Nermine Bacha \and Khaldoun Taktak \\
+    \textit{Télécom SudParis (TSP)}
+}
+\date{Novembre 2025}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+\subsection{Contexte du Projet}
+
+Les systèmes de recommandation sont devenus omniprésents dans le commerce électronique moderne. Dans le secteur de la mode en ligne, recommander les bons vêtements aux clients est crucial pour améliorer l'expérience utilisateur et augmenter les ventes. Ce projet s'inscrit dans le cadre d'une étude comparative de deux approches fondamentales de recommandation appliquées au domaine de la mode en ligne.
+
+\subsection{Objectifs}
+
+L'objectif principal de ce projet est de construire et de comparer deux systèmes de recommandation sur le dataset ModCloth Clothing Fit :
+
+\begin{enumerate}
+    \item \textbf{Filtrage Collaboratif (CF)} : basé sur les similarités entre utilisateurs ou items à partir des notes données
+    \item \textbf{Filtrage Basé sur le Contenu} : basé sur les caractéristiques textuelles et catégorielles des items
+\end{enumerate}
+
+Ce travail vise à déterminer quelle approche est la plus adaptée pour recommander des vêtements dans un contexte de données réelles avec forte sparsité.
+
+\subsection{Dataset ModCloth}
+
+Le dataset ModCloth Clothing Fit provient de l'UC San Diego McAuley Lab. Il contient des avis d'utilisateurs sur des vêtements avec :
+\begin{itemize}
+    \item Des notes d'évaluation (quality)
+    \item Des informations sur l'ajustement (fit : small, fit, large)
+    \item Des catégories de vêtements
+    \item Des avis textuels (review\_text, review\_summary)
+    \item Des métadonnées morphologiques (taille, poids, etc.)
+\end{itemize}
+
+\section{Problématique}
+
+Le défi principal de ce projet est de recommander des vêtements dans un contexte difficile. Le dataset ModCloth présente une sparsité extrême : la plupart des utilisateurs n'ont noté que quelques articles sur des milliers disponibles. C'est comme essayer de deviner les goûts de quelqu'un qui n'a commenté que 5 films sur Netflix.
+
+Cette sparsité pose plusieurs problèmes concrets :
+\begin{itemize}
+    \item Difficile de trouver des utilisateurs ayant des goûts similaires (trop peu d'overlaps)
+    \item Impossible de recommander aux nouveaux utilisateurs (pas d'historique)
+    \item Les algorithmes classiques de filtrage collaboratif peinent à trouver des patterns
+\end{itemize}
+
+Notre question est simple : face à ces données réelles et imparfaites, quelle méthode marche le mieux ? Le filtrage collaboratif qui se base sur les similarités entre utilisateurs, ou le filtrage par contenu qui utilise les descriptions des vêtements (catégorie, ajustement, avis textuels) ?
+
+\section{Méthodologie}
+
+\subsection{Pipeline de Travail}
+
+Notre approche suit le pipeline standard du Machine Learning pour les systèmes de recommandation :
+
+\begin{enumerate}
+    \item \textbf{Découverte des données} : exploration et compréhension du dataset
+    \item \textbf{Nettoyage} : gestion des valeurs manquantes et sélection des colonnes
+    \item \textbf{Filtrage de la sparsité} : élimination des utilisateurs/items rares
+    \item \textbf{Construction du dataset} : création des indices et split train/test
+    \item \textbf{Modélisation} : implémentation de CF et filtrage par contenu
+    \item \textbf{Évaluation} : calcul de métriques multiples
+    \item \textbf{Comparaison} : analyse des performances relatives
+\end{enumerate}
+
+\subsection{Prétraitement des Données}
+
+\subsubsection{Chargement}
+
+Le dataset est téléchargé directement depuis l'URL officielle :
+\begin{lstlisting}
+DATA_URL = "https://mcauleylab.ucsd.edu/public_datasets/data/modcloth/modcloth_final_data.json.gz"
+df_raw = pd.read_json(DATA_URL, lines=True, compression='gzip')
+\end{lstlisting}
+
+\subsubsection{Nettoyage}
+
+Trois stratégies de nettoyage ont été appliquées :
+\begin{itemize}
+    \item \textbf{Colonnes essentielles} (user\_id, item\_id, quality) : suppression des lignes avec valeurs manquantes
+    \item \textbf{Colonnes textuelles} (review\_text, review\_summary) : remplacement par chaînes vides
+    \item \textbf{Colonnes catégorielles} (category, fit) : remplacement par "unknown"
+\end{itemize}
+
+\subsubsection{Filtrage de la Sparsité}
+
+Pour réduire la sparsité, nous avons appliqué un filtrage itératif conservant uniquement les utilisateurs et items avec au moins 5 interactions :
+
+\begin{lstlisting}
+MIN_INTERACTIONS = 5
+# Filtrage iteratif jusqu'a convergence
+while True:
+    user_counts = df['user_id'].value_counts()
+    item_counts = df['item_id'].value_counts()
+    valid_users = user_counts[user_counts >= MIN_INTERACTIONS].index
+    valid_items = item_counts[item_counts >= MIN_INTERACTIONS].index
+    df = df[df['user_id'].isin(valid_users)]
+    df = df[df['item_id'].isin(valid_items)]
+    # Verifier convergence
+    if len(df) == prev_size: break
+\end{lstlisting}
+
+\subsection{Split Train/Test}
+
+Un split stratifié par utilisateur (80/20) a été effectué pour simuler un scénario réaliste de prédiction temporelle :
+
+\begin{lstlisting}
+for user_idx in range(len(unique_users)):
+    user_interactions = ratings_df[ratings_df['user_idx'] == user_idx].index
+    np.random.shuffle(user_interactions)
+    split_point = int(len(user_interactions) * 0.8)
+    train_indices.extend(user_interactions[:split_point])
+    test_indices.extend(user_interactions[split_point:])
+\end{lstlisting}
+
+\subsection{Filtrage Collaboratif (CF)}
+
+\subsubsection{Approche Choisie}
+
+Nous avons implémenté un \textbf{CF item-based avec k-NN} et similarité cosinus :
+
+\begin{itemize}
+    \item Construction d'une matrice sparse utilisateur-item
+    \item Utilisation de k=20 plus proches voisins
+    \item Prédiction par moyenne pondérée des similarités
+\end{itemize}
+
+\subsubsection{Algorithme de Prédiction}
+
+Pour prédire la note qu'un utilisateur $u$ donnerait à un item $i$ :
+
+\begin{equation}
+\hat{r}_{u,i} = \frac{\sum_{j \in N(i)} sim(i,j) \cdot r_{u,j}}{\sum_{j \in N(i)} sim(i,j)}
+\end{equation}
+
+où $N(i)$ sont les k items les plus similaires à $i$ que l'utilisateur $u$ a notés, et $sim(i,j)$ est la similarité cosinus entre items $i$ et $j$.
+
+\subsection{Filtrage Basé sur le Contenu}
+
+\subsubsection{Construction des Profils d'Items}
+
+Pour chaque item, nous avons concaténé :
+\begin{itemize}
+    \item Les avis textuels (review\_text, review\_summary)
+    \item La catégorie (répétée 3 fois pour amplifier son importance)
+    \item Le fit (répété 2 fois)
+\end{itemize}
+
+\subsubsection{Vectorisation TF-IDF}
+
+Transformation des textes en vecteurs TF-IDF :
+\begin{lstlisting}
+tfidf = TfidfVectorizer(
+    max_features=1000,
+    stop_words='english',
+    ngram_range=(1, 2),
+    min_df=2,
+    max_df=0.8
+)
+item_content_matrix = tfidf.fit_transform(item_text_list)
+\end{lstlisting}
+
+\subsubsection{Profils Utilisateurs}
+
+Le profil d'un utilisateur $u$ est calculé comme la moyenne pondérée des vecteurs TF-IDF des items qu'il a bien notés :
+
+\begin{equation}
+\vec{p}_u = \frac{\sum_{i \in I_u} r_{u,i} \cdot \vec{v}_i}{\sum_{i \in I_u} r_{u,i}}
+\end{equation}
+
+où $I_u$ sont les items notés $\geq 4$ par l'utilisateur $u$, $r_{u,i}$ est la note, et $\vec{v}_i$ est le vecteur TF-IDF de l'item $i$.
+
+\subsection{Métriques d'Évaluation}
+
+\subsubsection{Métriques de Prédiction (CF uniquement)}
+
+\begin{itemize}
+    \item \textbf{RMSE} (Root Mean Squared Error) : 
+    \begin{equation}
+    RMSE = \sqrt{\frac{1}{|T|} \sum_{(u,i) \in T} (r_{u,i} - \hat{r}_{u,i})^2}
+    \end{equation}
+    
+    \item \textbf{MAE} (Mean Absolute Error) :
+    \begin{equation}
+    MAE = \frac{1}{|T|} \sum_{(u,i) \in T} |r_{u,i} - \hat{r}_{u,i}|
+    \end{equation}
+\end{itemize}
+
+\subsubsection{Métriques de Recommandation}
+
+\begin{itemize}
+    \item \textbf{Precision@k} : proportion d'items pertinents dans les k premiers recommandés
+    \begin{equation}
+    Precision@k = \frac{|\text{Recommandés} \cap \text{Pertinents}|}{k}
+    \end{equation}
+    
+    \item \textbf{Recall@k} : proportion d'items pertinents capturés parmi tous les pertinents
+    \begin{equation}
+    Recall@k = \frac{|\text{Recommandés} \cap \text{Pertinents}|}{|\text{Pertinents}|}
+    \end{equation}
+\end{itemize}
+
+Items pertinents : ceux avec note $\geq 4$ dans le test set.
+
+\section{Résultats Expérimentaux}
+
+\subsection{Statistiques du Dataset Après Prétraitement}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Métrique} & \textbf{Initial} & \textbf{Final} \\
+\midrule
+Nombre d'interactions & 82,790 & 16,046 \\
+Nombre d'utilisateurs & 47,958 & 2,271 \\
+Nombre d'items & 1,378 & 302 \\
+Densité de la matrice & 0.125\% & 1.74\% \\
+Pourcentage conservé & 100\% & 19.38\% \\
+\bottomrule
+\end{tabular}
+\caption{Évolution des statistiques après prétraitement}
+\end{table}
+
+Malgré le filtrage agressif, la sparsité reste très élevée (98.26\%), ce qui représente un défi majeur pour le filtrage collaboratif.
+
+\subsection{Distribution des Données}
+
+\begin{itemize}
+    \item \textbf{Interactions par utilisateur} : moyenne = 7.07, médiane = 6.0, min = 5, max = 26
+    \item \textbf{Interactions par item} : moyenne = 53.13, médiane = 30.5, min = 5, max = 449
+\end{itemize}
+
+La distribution montre une forte asymétrie avec de nombreux utilisateurs ayant exactement 5 interactions (le minimum filtré) et quelques items très populaires.
+
+\subsection{Performances du Filtrage Collaboratif}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lc}
+\toprule
+\textbf{Métrique} & \textbf{Valeur} \\
+\midrule
+RMSE & 1.0394 \\
+MAE & 0.7153 \\
+Precision@10 & 0.0054 (0.54\%) \\
+Recall@10 & 0.0315 (3.15\%) \\
+Temps d'évaluation & $\sim$18 minutes \\
+\bottomrule
+\end{tabular}
+\caption{Résultats du filtrage collaboratif item-based k-NN}
+\end{table}
+
+\subsection{Performances du Filtrage par Contenu}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lc}
+\toprule
+\textbf{Métrique} & \textbf{Valeur} \\
+\midrule
+Precision@10 & 0.0365 (3.65\%) \\
+Recall@10 & 0.2680 (26.80\%) \\
+Temps d'évaluation & $\sim$1.5 secondes \\
+\bottomrule
+\end{tabular}
+\caption{Résultats du filtrage basé sur le contenu TF-IDF}
+\end{table}
+
+\subsection{Comparaison des Modèles}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Métrique} & \textbf{CF} & \textbf{Contenu} & \textbf{Amélioration} \\
+\midrule
+Precision@10 & 0.54\% & 3.65\% & +575\% \\
+Recall@10 & 3.15\% & 26.80\% & +750\% \\
+Temps d'exécution & 18 min & 1.5 s & 720$\times$ plus rapide \\
+\bottomrule
+\end{tabular}
+\caption{Comparaison des performances relatives}
+\end{table}
+
+Le filtrage par contenu surpasse significativement le filtrage collaboratif sur toutes les métriques de recommandation.
+
+\section{Analyse et Interprétation}
+
+\subsection{Supériorité du Filtrage par Contenu}
+
+Plusieurs facteurs expliquent la domination du filtrage par contenu sur ce dataset :
+
+\subsubsection{Sparsité Extrême}
+
+Avec une densité de seulement 1.74\% après filtrage (98.26\% de sparsité), le filtrage collaboratif manque cruellement de données pour identifier des patterns robustes. Les overlaps d'interactions entre utilisateurs sont rares, rendant difficile le calcul de similarités fiables.
+
+\subsubsection{Distribution des Interactions}
+
+La moyenne de 7.07 interactions par utilisateur est très faible. Beaucoup d'utilisateurs ont exactement 5 interactions (le minimum filtré), ce qui ne permet pas au CF de construire des profils utilisateur riches.
+
+\subsubsection{Nature des Données}
+
+Pour les vêtements, des attributs comme la catégorie (robe, pantalon, etc.) et le fit (ajustement) sont extrêmement informatifs. Un utilisateur qui aime des robes bien ajustées appréciera probablement d'autres robes similaires, une logique bien capturée par le filtrage par contenu.
+
+\subsubsection{Qualité des Features Structurées}
+
+Malgré que beaucoup d'avis textuels soient vides, les colonnes category et fit sont systématiquement renseignées. La stratégie de répétition de ces features (category $\times$ 3, fit $\times$ 2) a amplifié leur signal dans les vecteurs TF-IDF, rendant le modèle de contenu efficace.
+
+\subsection{Limitations du Filtrage Collaboratif}
+
+\subsubsection{Algorithme k-NN Basique}
+
+Le k-NN item-based est une approche simple mais limitée pour des données très sparses. Des méthodes de matrix factorization (SVD, ALS, NMF) auraient probablement mieux géré la sparsité en capturant des patterns latents.
+
+\subsubsection{Temps de Calcul}
+
+L'évaluation du CF a pris environ 18 minutes contre 1.5 secondes pour le contenu. Cette différence de scalabilité est critique pour un système en production.
+
+\subsubsection{Problème du Cold Start}
+
+Le CF ne peut pas recommander efficacement pour les nouveaux utilisateurs ou items, alors que le filtrage par contenu peut le faire dès qu'on a une description de l'item.
+
+\subsection{Performances Absolues Modestes}
+
+Même le meilleur modèle (contenu) n'atteint qu'une Precision@10 de 3.65\%. Cela signifie que sur 10 recommandations, moins de 1 est réellement pertinente. Cette performance modeste s'explique par :
+
+\begin{itemize}
+    \item La sparsité résiduelle élevée (98.26\%)
+    \item La qualité variable des avis textuels
+    \item L'hétérogénéité des préférences utilisateurs
+    \item Le manque de features riches (images, prix, matériaux, etc.)
+\end{itemize}
+
+Pour un système de production, ces performances seraient insuffisantes. Un modèle hybride combinant CF et contenu serait nécessaire.
+
+\section{Problèmes Rencontrés et Solutions}
+
+\subsection{Sparsité Excessive}
+
+\textbf{Problème :} Dataset initial avec 99.87\% de sparsité, rendant la modélisation très difficile.
+
+\textbf{Solution :} Filtrage itératif avec seuil de 5 interactions minimum. Cela a amélioré la densité à 1.74\% mais au prix de perdre 80\% des données.
+
+\textbf{Limite :} Le compromis qualité/quantité reste délicat. Un seuil plus bas (3 ou 4) aurait conservé plus de données.
+
+\subsection{Qualité des Données Textuelles}
+
+\textbf{Problème :} Environ 8\% des avis textuels sont vides après nettoyage initial, beaucoup d'autres sont très courts.
+
+\textbf{Solution :} 
+\begin{itemize}
+    \item Remplacement des NaN par chaînes vides
+    \item Amplification des features structurées (category $\times$ 3, fit $\times$ 2)
+    \item Utilisation de bigrammes dans TF-IDF (ngram\_range=(1,2))
+\end{itemize}
+
+\textbf{Résultat :} Les catégories et le fit deviennent les features dominantes, compensant le manque de texte riche.
+
+\subsection{Temps de Calcul du CF}
+
+\textbf{Problème :} Évaluation du CF très lente (18 minutes pour 4,033 prédictions).
+
+\textbf{Solutions appliquées :}
+\begin{itemize}
+    \item Utilisation de matrices sparse (scipy.sparse.csr\_matrix)
+    \item Algorithme brute force pour k-NN (optimal pour sparse)
+    \item Limitation de l'évaluation à 100 utilisateurs pour Precision/Recall
+\end{itemize}
+
+\textbf{Solutions non implémentées :}
+\begin{itemize}
+    \item Pré-calcul et cache des similarités item-item
+    \item Approximation via LSH (Locality-Sensitive Hashing)
+    \item Parallélisation avec joblib ou multiprocessing
+\end{itemize}
+
+\subsection{Déséquilibre des Notes}
+
+\textbf{Problème :} Distribution fortement biaisée vers les notes élevées (4 et 5), notes de 1-2 très rares.
+
+\textbf{Solution partielle :} Seuil de 4.0 pour définir les items "positifs" dans les métriques de ranking.
+
+\textbf{Non résolu :} Techniques de rééquilibrage (sous-échantillonnage) ou métriques pondérées auraient pu être explorées.
+
+\section{Pistes d'Amélioration}
+
+Nos résultats montrent que le filtrage par contenu surpasse le collaboratif, mais les performances restent modestes (3.65\% de précision). Voici comment on pourrait améliorer le système :
+
+\subsection{Améliorer le Filtrage Collaboratif}
+
+Le k-NN qu'on a utilisé est basique. Des techniques plus avancées comme la factorisation matricielle (SVD) permettent de mieux gérer la sparsité en découvrant des patterns cachés dans les données. Au lieu de comparer directement les utilisateurs, SVD trouve des "facteurs latents" (ex : style casual, formel, sportif) qui expliquent mieux les préférences.
+
+On pourrait aussi essayer de garder plus de données en réduisant le seuil de filtrage à 3 interactions au lieu de 5.
+
+\subsection{Enrichir les Données}
+
+Le problème principal vient du manque d'information. On pourrait :
+\begin{itemize}
+    \item Récupérer les vraies descriptions produits (pas juste les avis utilisateurs)
+    \item Ajouter des images des vêtements et utiliser un réseau de neurones pour extraire des features visuelles
+    \item Intégrer le prix, la marque, les matériaux
+\end{itemize}
+
+\subsection{Modèle Hybride}
+
+Plutôt que de choisir entre CF et contenu, on pourrait combiner les deux. Par exemple, utiliser le contenu pour les nouveaux utilisateurs (cold start) et progressivement intégrer le CF quand on a assez d'interactions. La formule simple serait :
+\begin{equation}
+score_{final} = 0.3 \times score_{CF} + 0.7 \times score_{contenu}
+\end{equation}
+
+\subsection{Techniques Plus Avancées}
+
+Pour aller plus loin, on pourrait utiliser :
+\begin{itemize}
+    \item \textbf{BERT} pour mieux comprendre les avis textuels (au lieu de simple TF-IDF)
+    \item \textbf{Deep Learning} avec des réseaux de neurones qui apprennent automatiquement les meilleures features
+    \item \textbf{Modèles séquentiels} qui prennent en compte l'ordre des achats (ex : après un pantalon, recommander une chemise assortie)
+\end{itemize}
+
+\section{Conclusion}
+
+Ce projet nous a permis de comparer deux approches classiques des systèmes de recommandation sur des données réelles de e-commerce de mode. Le résultat principal est clair : sur le dataset ModCloth avec sa sparsité extrême (98.26\%), le filtrage par contenu surpasse largement le filtrage collaboratif (Recall de 26.80\% vs 3.15\%). Cette différence s'explique par le manque d'interactions communes entre utilisateurs, qui empêche le CF de trouver des similarités robustes, alors que le filtrage par contenu peut exploiter les attributs structurés des vêtements (catégorie, ajustement) qui sont bien renseignés. Cependant, même le meilleur modèle n'atteint qu'une précision de 3.65\%, ce qui reste faible et montre les limites de ces approches basiques face à la complexité des préférences humaines en matière de mode.
+
+Pour améliorer significativement les performances, un modèle hybride combinant les deux approches avec des techniques plus avancées (factorisation matricielle, embeddings BERT, deep learning) serait nécessaire, ainsi qu'un enrichissement des données avec des images et des descriptions produits complètes.
+
+\end{document}
